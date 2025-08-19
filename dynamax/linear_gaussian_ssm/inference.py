@@ -460,7 +460,7 @@ def lgssm_joint_sample(params: ParamsLGSSM,
 
 @preprocess_args
 def lgssm_filter(params: ParamsLGSSM,
-                #  emissions:  Float[Array, "ntime emission_dim"],
+                # emissions:  Float[Array, "ntime emission_dim"],
                 emissions: Emission,
                  inputs: Optional[Float[Array, "ntime input_dim"]]=None
                  ) -> PosteriorGSSMFiltered:
@@ -518,7 +518,8 @@ def lgssm_filter(params: ParamsLGSSM,
 
 @preprocess_args
 def lgssm_smoother(params: ParamsLGSSM,
-                   emissions: Float[Array, "ntime emission_dim"],
+                   # emissions:  Float[Array, "ntime emission_dim"],
+                   emissions: Emission,
                    inputs: Optional[Float[Array, "ntime input_dim"]]=None
                    ) -> PosteriorGSSMSmoothed:
     r"""Run forward-filtering, backward-smoother to compute expectations

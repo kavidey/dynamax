@@ -15,8 +15,17 @@ class Emission(ABC):
     @abstractmethod
     def emit(self, t: int, F, B, b, Q, H, D, d) -> Tuple[Float[Array, "emission_dim"], Float[Array, "emission_dim emission_dim"]]:
         pass
+    
+    @abstractmethod
+    def __len__(self) -> int:
+        pass
 
-    def __len__(self) -> int: # type: ignore
+    @abstractmethod
+    def means(self) -> Float[Array, "num_timesteps emission_dim"]:
+        pass
+
+    @abstractmethod
+    def covs(self) -> Float[Array, "num_timesteps emission_dim emission_dim"]:
         pass
 
 class EmissionDynamicCovariance(Emission):
@@ -29,3 +38,13 @@ class EmissionDynamicCovariance(Emission):
 
     def __len__(self) -> int:
         return self.emissions.shape[0]
+    
+    def means(self) -> Float[Array, "num_timesteps emission_dim"]:
+        return self.emissions
+
+    def covs(self) -> Float[Array, "num_timesteps emission_dim emission_dim"]:
+        return self.emission_covs
+
+class EmissionConstantCovariance(EmissionDynamicCovariance):
+    def __init__(self, emissions: Array, R: Array):
+        super().__init__(emissions, jnp.broadcast_to(R, (emissions.shape[0], emissions.shape[1], emissions.shape[1])))

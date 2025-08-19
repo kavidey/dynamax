@@ -18,6 +18,7 @@ from dynamax.ssm import SSM
 from dynamax.linear_gaussian_ssm.inference import lgssm_joint_sample, lgssm_filter, lgssm_smoother, lgssm_posterior_sample
 from dynamax.linear_gaussian_ssm.inference import ParamsLGSSM, ParamsLGSSMInitial, ParamsLGSSMDynamics, ParamsLGSSMEmissions
 from dynamax.linear_gaussian_ssm.inference import PosteriorGSSMFiltered, PosteriorGSSMSmoothed
+from dynamax.linear_gaussian_ssm.emission import Emission
 from dynamax.parameters import ParameterProperties
 from dynamax.types import PRNGKeyT, Scalar
 from dynamax.utils.bijectors import RealToPSDBijector
@@ -223,7 +224,7 @@ class LinearGaussianSSM(SSM):
 
     def marginal_log_prob(self,
                           params: ParamsLGSSM,
-                          emissions: Float[Array, "num_timesteps emission_dim"],
+                          emissions: Emission,
                           inputs: Optional[Float[Array, "num_timesteps input_dim"]] = None) \
                           -> Scalar:
         """Compute the marginal log likelihood of the model.
@@ -241,7 +242,7 @@ class LinearGaussianSSM(SSM):
 
     def filter(self,
                params: ParamsLGSSM,
-               emissions: Float[Array, "num_timesteps emission_dim"],
+               emissions: Emission,
                inputs: Optional[Float[Array, "num_timesteps input_dim"]] = None) \
                -> PosteriorGSSMFiltered:
         """Compute the marginal filtering distribution for each time step.
@@ -258,7 +259,7 @@ class LinearGaussianSSM(SSM):
 
     def smoother(self,
                  params: ParamsLGSSM,
-                 emissions: Float[Array, "num_timesteps emission_dim"],
+                 emissions: Emission,
                  inputs: Optional[Float[Array, "num_timesteps input_dim"]] = None) \
                  -> PosteriorGSSMSmoothed:
         """Compute the posterior smoothing distribution for each time step.
@@ -378,8 +379,7 @@ class LinearGaussianSSM(SSM):
     # Expectation-maximization (EM) code
     def e_step(self,
                params: ParamsLGSSM,
-               emissions: Union[Float[Array, "num_timesteps emission_dim"],
-                                Float[Array, "num_batches num_timesteps emission_dim"]],
+               emissions: Emission,
                inputs: Optional[Union[Float[Array, "num_timesteps input_dim"],
                                       Float[Array, "num_batches num_timesteps input_dim"]]]=None) \
                -> Tuple[SuffStatsLGSSM, Scalar]:
@@ -393,7 +393,7 @@ class LinearGaussianSSM(SSM):
         Returns:
             expected sufficient statistics and marginal log likelihood.
         """
-        num_timesteps = emissions.shape[0]
+        num_timesteps = len(emissions)
         if inputs is None:
             inputs = jnp.zeros((num_timesteps, 0))
 
@@ -413,7 +413,7 @@ class LinearGaussianSSM(SSM):
         inputs = jnp.concatenate((inputs, jnp.ones((num_timesteps, 1))), axis=1)
         up = inputs[:-1]
         u = inputs
-        y = emissions
+        y = emissions.means()
 
         # expected sufficient statistics for the initial tfd.Distribution
         Ex0 = posterior.smoothed_means[0]
@@ -437,7 +437,7 @@ class LinearGaussianSSM(SSM):
         sum_zzT = jnp.block([[Ex.T @ Ex, Ex.T @ u], [u.T @ Ex, u.T @ u]])
         sum_zzT = sum_zzT.at[:self.state_dim, :self.state_dim].add(Vx.sum(0))
         sum_zyT = jnp.block([[Ex.T @ y], [u.T @ y]])
-        sum_yyT = emissions.T @ emissions
+        sum_yyT = y.T @ y
         emission_stats = (sum_zzT, sum_zyT, sum_yyT, num_timesteps)
         if not self.has_emissions_bias:
             emission_stats = (sum_zzT[:-1, :-1], sum_zyT[:-1, :], sum_yyT, num_timesteps)
