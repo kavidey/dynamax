@@ -19,6 +19,8 @@ from tensorflow_probability.substrates.jax.distributions import (
     MultivariateNormalDiagPlusLowRankCovariance as MVNLowRank,
     MultivariateNormalFullCovariance as MVN)
 
+from dynamax.linear_gaussian_ssm.emission import Emission
+
 class ParamsLGSSMInitial(NamedTuple):
     r"""Parameters of the initial distribution
 
@@ -458,7 +460,8 @@ def lgssm_joint_sample(params: ParamsLGSSM,
 
 @preprocess_args
 def lgssm_filter(params: ParamsLGSSM,
-                 emissions:  Float[Array, "ntime emission_dim"],
+                #  emissions:  Float[Array, "ntime emission_dim"],
+                emissions: Emission,
                  inputs: Optional[Float[Array, "ntime input_dim"]]=None
                  ) -> PosteriorGSSMFiltered:
     r"""Run a Kalman filter to produce the marginal likelihood and filtered state estimates.
@@ -493,7 +496,8 @@ def lgssm_filter(params: ParamsLGSSM,
         # Shorthand: get parameters and inputs for time index t
         F, B, b, Q, H, D, d, R = _get_params(params, num_timesteps, t)
         u = inputs[t]
-        y = emissions[t]
+        # y = emissions[t]
+        y, R = emissions.emit(t, F, B, b, Q, H, D, d)
 
         # Update the log likelihood
         ll += _log_likelihood(pred_mean, pred_cov, H, D, d, R, u, y)
