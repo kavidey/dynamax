@@ -413,7 +413,7 @@ class LinearGaussianSSM(SSM):
         inputs = jnp.concatenate((inputs, jnp.ones((num_timesteps, 1))), axis=1)
         up = inputs[:-1]
         u = inputs
-        y = emissions.means()
+        y = posterior.emission_means
 
         # expected sufficient statistics for the initial tfd.Distribution
         Ex0 = posterior.smoothed_means[0]

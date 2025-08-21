@@ -8,9 +8,11 @@ from dynamax.linear_gaussian_ssm.inference import lgssm_filter
 from dynamax.linear_gaussian_ssm.inference import lgssm_smoother
 from dynamax.linear_gaussian_ssm.inference import lgssm_posterior_sample
 from dynamax.linear_gaussian_ssm.inference import lgssm_joint_sample
+from dynamax.linear_gaussian_ssm.inference import _condition_on
 
 from dynamax.linear_gaussian_ssm.emission import EmissionDynamicCovariance
 from dynamax.linear_gaussian_ssm.emission import EmissionConstantCovariance
+from dynamax.linear_gaussian_ssm.emission import EmissionPDA
 
 from dynamax.linear_gaussian_ssm.info_inference import ParamsLGSSMInfo
 from dynamax.linear_gaussian_ssm.info_inference import PosteriorGSSMInfoFiltered

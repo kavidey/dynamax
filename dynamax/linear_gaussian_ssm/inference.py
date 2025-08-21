@@ -125,6 +125,8 @@ class PosteriorGSSMFiltered(NamedTuple):
     marginal_loglik: Union[Scalar, Float[Array, " ntime"]]
     filtered_means: Optional[Float[Array, "ntime state_dim"]] = None
     filtered_covariances: Optional[Float[Array, "ntime state_dim state_dim"]] = None
+    emission_means: Optional[Float[Array, "ntime input_dim"]] = None
+    emission_covariances: Optional[Float[Array, "ntime input_dim input_dim"]] = None
     predicted_means: Optional[Float[Array, "ntime state_dim"]] = None
     predicted_covariances: Optional[Float[Array, "ntime state_dim state_dim"]] = None
 
@@ -143,6 +145,8 @@ class PosteriorGSSMSmoothed(NamedTuple):
     marginal_loglik: Scalar
     filtered_means: Float[Array, "ntime state_dim"]
     filtered_covariances: Float[Array, "ntime state_dim state_dim"]
+    emission_means: Optional[Float[Array, "ntime input_dim"]]
+    emission_covariances: Optional[Float[Array, "ntime input_dim input_dim"]]
     smoothed_means: Float[Array, "ntime state_dim"]
     smoothed_covariances: Float[Array, "ntime state_dim state_dim"]
     smoothed_cross_covariances: Optional[Float[Array, "ntime_minus1 state_dim state_dim"]] = None
@@ -497,7 +501,7 @@ def lgssm_filter(params: ParamsLGSSM,
         F, B, b, Q, H, D, d, R = _get_params(params, num_timesteps, t)
         u = inputs[t]
         # y = emissions[t]
-        y, R = emissions.emit(t, F, B, b, Q, H, D, d)
+        y, R = emissions.emit(t, pred_mean, pred_cov, F, B, b, Q, H, D, d, u)
 
         # Update the log likelihood
         ll += _log_likelihood(pred_mean, pred_cov, H, D, d, R, u, y)
@@ -508,12 +512,16 @@ def lgssm_filter(params: ParamsLGSSM,
         # Predict the next state
         pred_mean, pred_cov = _predict(filtered_mean, filtered_cov, F, B, b, Q, u)
 
-        return (ll, pred_mean, pred_cov), (filtered_mean, filtered_cov)
+        return (ll, pred_mean, pred_cov), (filtered_mean, filtered_cov, y, R)
 
     # Run the Kalman filter
     carry = (0.0, params.initial.mean, params.initial.cov)
-    (ll, _, _), (filtered_means, filtered_covs) = lax.scan(_step, carry, jnp.arange(num_timesteps))
-    return PosteriorGSSMFiltered(marginal_loglik=ll, filtered_means=filtered_means, filtered_covariances=filtered_covs)
+    (ll, _, _), (filtered_means, filtered_covs, emission_means, emission_covs) = lax.scan(_step, carry, jnp.arange(num_timesteps))
+    return PosteriorGSSMFiltered(
+        marginal_loglik=ll,
+        filtered_means=filtered_means, filtered_covariances=filtered_covs,
+        emission_means=emission_means, emission_covariances=emission_covs
+    )
 
 
 @preprocess_args
@@ -540,7 +548,7 @@ def lgssm_smoother(params: ParamsLGSSM,
 
     # Run the Kalman filter
     filtered_posterior = lgssm_filter(params, emissions, inputs)
-    ll, filtered_means, filtered_covs, *_ = filtered_posterior
+    ll, filtered_means, filtered_covs, emission_means, emission_covs, *_ = filtered_posterior
 
     # Run the smoother backward in time
     def _step(carry, args):
@@ -582,6 +590,8 @@ def lgssm_smoother(params: ParamsLGSSM,
         marginal_loglik=ll,
         filtered_means=filtered_means,
         filtered_covariances=filtered_covs,
+        emission_means=emission_means,
+        emission_covariances=emission_covs,
         smoothed_means=smoothed_means,
         smoothed_covariances=smoothed_covs,
         smoothed_cross_covariances=smoothed_cross,
