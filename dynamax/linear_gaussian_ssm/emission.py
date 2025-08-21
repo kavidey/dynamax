@@ -52,6 +52,30 @@ def MVN_multiply(m1: Array, c1: Array, m2: Array, c2: Array) -> Tuple[float, Tup
 
     return c, (mean, cov)
 
+def MVN_log_likelihood(mean: Array, cov: Array, x: Array) -> float:
+    '''
+    Calculates the likelihood of the observation under the gaussian distribution
+    
+
+    Parameter
+    ---------
+    mean: Array
+        mean of distribution
+    cov: Array
+        covariance of distribution
+    x: Array
+        observed sample
+    
+    Returns
+    ------
+    float: log likelihood of observing x under the distribution
+    '''
+    k = mean.shape[-1]
+    mean_diff = mean - x
+    # log_likelihood = -(1/2) * (k * jnp.log(2*jnp.pi) + jnp.log(jnp.linalg.det(cov)) + mean_diff.T @ jnp.linalg.inv(cov) @ mean_diff)
+    log_likelihood = -(1/2) * (k * jnp.log(2*jnp.pi) + jnp.log(jnp.linalg.det(cov)) + mean_diff.T @ jnp.linalg.solve(cov, mean_diff))
+    return log_likelihood
+
 def MVN_inverse_bayes(prior: Tuple[Array, Array], posterior: Tuple[Array, Array]):
     '''
     Determines the gaussian likelihood function given a gaussian posterior and prior
@@ -146,6 +170,56 @@ class EmissionDynamicCovariance(Emission):
     def __len__(self) -> int:
         return self.emissions.shape[0]
 
+class EmissionCAVI(Emission):
+    def __init__(self,
+                 emissions: Float[Array, "num_timesteps num_observations emission_dim"],
+                 emission_covs: Float[Array, "num_timesteps num_observations emission_dim emission_dim"],
+                 beta: Optional[Float[Array, "num_timesteps num_observations"]]=None,
+                 p_d=0.9, g=1.0, m_t=1.0
+                ):
+        self.emissions = emissions
+        self.emission_covs = emission_covs
+        self.p_d = p_d
+        self.g = g
+        self.m_t = m_t
+        self.beta = self.initial_beta() if beta is None else beta
+    
+    def emit(self, t: int, pred_mean, pred_cov, F, B, b, Q, H, D, d, u) -> Tuple[Float[Array, "emission_dim"], Float[Array, "emission_dim emission_dim"]]:
+        b = self.beta[t]
+        emission = b[1:] @ self.emissions[t] / (1-b[0])
+        emission_cov = self.emission_covs[t].mean(axis=0) / (1-b[0]) # TODO: get rid of mean which averages observation covs
+        return (emission, emission_cov)
+
+    def __len__(self) -> int:
+        return self.emissions.shape[0]
+    
+    def initial_beta(self):
+        num_obj = self.emissions.shape[1]
+        beta = jnp.ones((self.emissions.shape[0], num_obj+1))
+        beta = beta * self.p_d / num_obj
+        beta = beta.at[:, 0].set((1-self.p_d))
+        return beta
+
+    def update_beta(self, q_dist, H):
+        def beta_t(emissions, emission_covs, q_dist):
+            Z_t = (
+                (1-self.p_d)*self.g
+                + (self.p_d/self.m_t)
+                    * jnp.exp(-0.5 * jnp.trace(H.T @ jnp.linalg.inv(emission_covs.mean(axis=0)) @ H @ q_dist[1]))
+                    * jax.vmap(lambda emission, emission_cov: jnp.exp(MVN_log_likelihood(H@q_dist[0], emission_cov, emission)))(emissions, emission_covs).sum()
+            )
+
+            beta_0 = (1/Z_t) * (1-self.p_d) * self.g
+
+            beta_k = (1/Z_t) * (self.p_d/self.m_t) * (
+                jax.vmap(lambda emission, emission_cov: 
+                         jnp.exp(MVN_log_likelihood(H@q_dist[0], emission_cov, emission))
+                         * jnp.exp(-0.5 * jnp.trace(H.T @ jnp.linalg.inv(emission_cov) @ H @ q_dist[1]))
+                         )(emissions, emission_covs)
+            )
+            return jnp.concat([beta_0[None], beta_k])
+        return jax.vmap(beta_t)(self.emissions, self.emission_covs, q_dist)
+
 class EmissionConstantCovariance(EmissionDynamicCovariance):
     def __init__(self, emissions: Array, R: Array):
         super().__init__(emissions, jnp.broadcast_to(R, (emissions.shape[0], emissions.shape[1], emissions.shape[1])))
@@ -182,7 +256,7 @@ class EmissionPDA(Emission):
         )(self.emissions[t], self.emission_covs[t])
 
         # normalize list to fix underflow issues
-        w_ks = w_ks - jnp.max(w_ks) # jax.lax.stop_gradient(jnp.max(w_ks))
+        w_ks = w_ks - jnp.max(w_ks)
         
         # sharpen
         w_ks = w_ks * self.sharpening
@@ -190,7 +264,7 @@ class EmissionPDA(Emission):
         w_ks = jnp.exp(w_ks)
         # normalize
         w_ks = w_ks / w_ks.sum()
-        
+
         filtered_mean, filtered_cov = GMM_moment_match((filtered_means, filtered_covs), w_ks)
         
         filtered_emission_mean = H @ filtered_mean
